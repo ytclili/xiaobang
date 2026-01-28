@@ -83,11 +83,6 @@ class ChatItemFactory {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      msg.extra?['icon'] ?? "✨",
-                      style: TextStyle(fontSize: 20.sp),
-                    ),
-                    SizedBox(width: 8.w),
                     Flexible(
                       child: Text(
                         msg.content,

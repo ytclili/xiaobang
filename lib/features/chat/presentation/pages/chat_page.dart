@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/network/api_client.dart';
 import '../../domain/entities/message.dart';
 import '../widgets/chat_item_factory.dart';
 import '../widgets/bottom_input_bar.dart';
@@ -20,30 +21,17 @@ class _ChatPageState extends State<ChatPage> {
     MessageEntity(
       id: '1',
       type: MessageType.header,
-      content: '晚上好，hi！',
-    ),
-    MessageEntity(
-      id: '2',
-      type: MessageType.quickAction,
-      content: '听说你对"小帮专属券"有疑问？',
-      extra: {'icon': '😋'},
-    ),
-    MessageEntity(
-      id: '3',
-      type: MessageType.quickAction,
-      content: '「睡前冥想」能提升创造力哦～',
-      extra: {'icon': '🧘'},
-    ),
-    MessageEntity(
-      id: '4',
-      type: MessageType.quickAction,
-      content: '冬季滋补养生建议',
-      extra: {'icon': '🥘🍵'},
+      content: '\u665a\u4e0a\u597d\uff0chi\uff01',
     ),
   ];
 
   final ScrollController _scrollController = ScrollController();
   final FocusNode _drawerFocusNode = FocusNode();
+  @override
+  void initState() {
+    super.initState();
+    _fetchRecommendQuestions();
+  }
 
   @override
   void dispose() {
@@ -52,7 +40,39 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  // 发送消息
+  Future<void> _fetchRecommendQuestions() async {
+    try {
+      final response = await ApiClient.instance.post('/recommend/questions');
+      debugPrint('recommend/questions response: ${response.data}');
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        final payload = data['data'];
+        if (payload is Map<String, dynamic>) {
+          final questions = payload['questions'];
+          if (questions is List) {
+            final now = DateTime.now().millisecondsSinceEpoch;
+            setState(() {
+              _messages.removeWhere((item) => item.type == MessageType.quickAction);
+              for (var i = 0; i < questions.length; i++) {
+                final question = questions[i];
+                if (question is String && question.trim().isNotEmpty) {
+                  _messages.add(MessageEntity(
+                    id: '${now}_$i',
+                    type: MessageType.quickAction,
+                    content: question,
+                  ));
+                }
+              }
+            });
+          }
+        }
+      }
+    } catch (error, stackTrace) {
+      debugPrint('recommend/questions error: $error');
+      debugPrint('$stackTrace');
+    }
+  }
+
   void _handleSendMessage(String text) {
     if (text.trim().isEmpty) return;
 
