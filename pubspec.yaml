@@ -1,0 +1,36 @@
+name: xiaobang
+description: "Xiaobang - Enterprise AI Assistant"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_screenutil: ^5.9.0
+  flutter_riverpod: ^2.5.1
+  flutter_animate: ^4.5.0
+  google_fonts: ^6.1.0
+  dio: ^5.9.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/avatar.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#00D280"
+  adaptive_icon_foreground: "assets/images/avatar.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
