@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:xiaobang/core/theme/app_theme.dart';
 import 'package:xiaobang/features/chat/domain/entities/message.dart';
 
 class ChatItemFactory {
-  static Widget build(MessageEntity message) {
+  static Widget build(
+    MessageEntity message, {
+    void Function(String message)? onQuickActionTap,
+  }) {
     switch (message.type) {
       case MessageType.header:
         return _buildHeader(message.content);
       case MessageType.quickAction:
-        return _buildQuickAction(message);
+        return _buildQuickAction(message, onQuickActionTap);
       case MessageType.todo:
         return _buildTodoCard(message);
       case MessageType.richText:
@@ -52,7 +57,13 @@ class ChatItemFactory {
     );
   }
 
-  static Widget _buildQuickAction(MessageEntity msg) {
+  static Widget _buildQuickAction(
+    MessageEntity msg,
+    void Function(String message)? onQuickActionTap,
+  ) {
+    if (msg.extra?['loading'] == true) {
+      return _buildQuickActionSkeleton(msg);
+    }
     return Container(
       margin: EdgeInsets.only(bottom: 12.h),
       child: Align(
@@ -61,7 +72,10 @@ class ChatItemFactory {
           color: Colors.transparent,
           child: InkWell(
             onTap: () {
-              // TODO: 处理快速操作点击
+              if (onQuickActionTap != null) {
+                onQuickActionTap(msg.content);
+                return;
+              }
               debugPrint('Quick action tapped: ${msg.content}');
             },
             borderRadius: BorderRadius.circular(20.r),
@@ -96,6 +110,60 @@ class ChatItemFactory {
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _buildQuickActionSkeleton(MessageEntity msg) {
+    final width = (msg.extra?['width'] as num?)?.toDouble() ?? 220;
+    const baseColor = Color(0xFFE9EBEF);
+    const highlightColor = Color(0xFFF7F8FA);
+    return Container(
+      margin: EdgeInsets.only(bottom: 12.h),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Shimmer.fromColors(
+          baseColor: baseColor,
+          highlightColor: highlightColor,
+          period: const Duration(milliseconds: 1200),
+          child: Container(
+            constraints: BoxConstraints(maxWidth: 320.w),
+            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 10.h),
+            decoration: BoxDecoration(
+              color: XiaobangColors.cardWhite,
+              borderRadius: BorderRadius.circular(20.r),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: width.w,
+                  height: 14.h,
+                  decoration: BoxDecoration(
+                    color: baseColor,
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
+                ),
+                SizedBox(width: 8.w),
+                Container(
+                  width: 24.w,
+                  height: 14.h,
+                  decoration: BoxDecoration(
+                    color: baseColor,
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -200,13 +268,16 @@ class ChatItemFactory {
   }
 
   static Widget _buildTextBubble(MessageEntity msg) {
+    if (!msg.isFromUser && msg.extra?['streaming'] == true && msg.content.isEmpty) {
+      return _buildTypingBubble();
+    }
     return Align(
       alignment: msg.isFromUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: EdgeInsets.only(
           bottom: 12.h,
           left: msg.isFromUser ? 60.w : 0,
-          right: msg.isFromUser ? 0 : 60.w,
+          right: msg.isFromUser ? 0 : 20.w,
         ),
         padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
         decoration: BoxDecoration(
@@ -231,6 +302,39 @@ class ChatItemFactory {
             fontSize: 15.sp,
             color: XiaobangColors.textMain,
           ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _buildTypingBubble() {
+    const dotColor = Color(0xFFBFC5D2);
+    const bubbleColor = Color(0xFFF2F3F5);
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: EdgeInsets.only(bottom: 12.h, right: 60.w),
+        padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
+        decoration: BoxDecoration(
+          color: bubbleColor,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(16.r),
+            topRight: Radius.circular(16.r),
+            bottomLeft: Radius.circular(4.r),
+            bottomRight: Radius.circular(16.r),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: LoadingAnimationWidget.dotsTriangle(
+          color: dotColor,
+          size: 18.w,
         ),
       ),
     );

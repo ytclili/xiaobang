@@ -16,6 +16,8 @@ dependencies:
   dio: ^5.9.1
   font_awesome_flutter: ^10.7.0
   shared_preferences: ^2.3.2
+  shimmer: ^3.0.0
+  loading_animation_widget: ^1.3.0
 
 dev_dependencies:
   flutter_test:

@@ -41,4 +41,37 @@ class ApiClient {
       onReceiveProgress: onReceiveProgress,
     );
   }
+
+  Future<Response<T>> get<T>(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+    CancelToken? cancelToken,
+  }) {
+    return _dio.get<T>(
+      path,
+      queryParameters: queryParameters,
+      options: options,
+      cancelToken: cancelToken,
+    );
+  }
+
+  Future<Response<ResponseBody>> postStream(
+    String path, {
+    Object? data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+    CancelToken? cancelToken,
+  }) {
+    final requestOptions = (options ?? Options()).copyWith(
+      responseType: ResponseType.stream,
+    );
+    return _dio.post<ResponseBody>(
+      path,
+      data: data,
+      queryParameters: queryParameters,
+      options: requestOptions,
+      cancelToken: cancelToken,
+    );
+  }
 }
