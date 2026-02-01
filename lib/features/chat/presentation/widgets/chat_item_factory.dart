@@ -269,7 +269,10 @@ class ChatItemFactory {
 
   static Widget _buildTextBubble(MessageEntity msg) {
     if (!msg.isFromUser && msg.extra?['streaming'] == true && msg.content.isEmpty) {
-      return _buildTypingBubble();
+      final statusText = msg.extra?['statusText'];
+      return _buildTypingBubble(
+        statusText: statusText is String ? statusText : null,
+      );
     }
     return Align(
       alignment: msg.isFromUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -307,9 +310,10 @@ class ChatItemFactory {
     );
   }
 
-  static Widget _buildTypingBubble() {
+  static Widget _buildTypingBubble({String? statusText}) {
     const dotColor = Color(0xFFBFC5D2);
     const bubbleColor = Color(0xFFF2F3F5);
+    final hasStatus = statusText != null && statusText.trim().isNotEmpty;
 
     return Align(
       alignment: Alignment.centerLeft,
@@ -332,10 +336,33 @@ class ChatItemFactory {
             ),
           ],
         ),
-        child: LoadingAnimationWidget.dotsTriangle(
-          color: dotColor,
-          size: 18.w,
-        ),
+        child: hasStatus
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LoadingAnimationWidget.dotsTriangle(
+                    color: dotColor,
+                    size: 18.w,
+                  ),
+                  SizedBox(width: 8.w),
+                  Flexible(
+                    child: Text(
+                      statusText!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13.sp,
+                        color: XiaobangColors.textSecondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : LoadingAnimationWidget.dotsTriangle(
+                color: dotColor,
+                size: 18.w,
+              ),
       ),
     );
   }

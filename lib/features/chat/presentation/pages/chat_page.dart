@@ -9,6 +9,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/user_session.dart';
 import '../../domain/entities/message.dart';
 import '../widgets/chat_item_factory.dart';
 import '../widgets/bottom_input_bar.dart';
@@ -166,6 +167,11 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _startAiStream(String userMessage, String aiMessageId) async {
     _cancelAiStream();
+    final userId = UserSession.userId;
+    if (userId == null || userId.isEmpty) {
+      _failAiStream(aiMessageId, '登录信息失效，请重新登录');
+      return;
+    }
     _streamCancelToken = CancelToken();
     _sseBuffer = '';
     _utf16Carry = '';
@@ -176,7 +182,7 @@ class _ChatPageState extends State<ChatPage> {
         'https://ai.xcbm.cc/api/chat/stream',
         data: {
           'message': userMessage,
-          'userId': '1234567',
+          'userId': userId,
           'sessionId': _currentSessionId,
         },
         options: Options(receiveTimeout: const Duration(minutes: 1)),
@@ -219,7 +225,23 @@ class _ChatPageState extends State<ChatPage> {
           _markStreamDone(aiMessageId);
           continue;
         }
-        final text = _extractStreamText(data);
+        dynamic decoded;
+        try {
+          decoded = jsonDecode(data);
+        } catch (_) {
+          decoded = null;
+        }
+        if (decoded is Map<String, dynamic>) {
+          final type = decoded['type'];
+          if (type == 'status') {
+            final status = decoded['content'];
+            if (status is String && status.trim().isNotEmpty) {
+              _updateStreamingStatus(aiMessageId, status.trim());
+            }
+            continue;
+          }
+        }
+        final text = _extractStreamText(decoded, data);
         if (text != null && text.isNotEmpty) {
           _enqueueDelta(text);
         }
@@ -227,35 +249,49 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  String? _extractStreamText(String data) {
-    try {
-      final decoded = jsonDecode(data);
-      if (decoded is String) {
-        return decoded;
-      }
-      if (decoded is Map<String, dynamic>) {
-        final type = decoded['type'];
-        if (type == 'status') {
-          return null;
-        }
-        if (type == 'text') {
-          final content = decoded['content'];
-          if (content is String && content.trim().isNotEmpty) {
-            return content;
-          }
-        }
-        final candidates = ['content', 'message', 'text', 'delta', 'answer', 'result'];
-        for (final key in candidates) {
-          final value = decoded[key];
-          if (value is String && value.trim().isNotEmpty) {
-            return value;
-          }
-        }
-      }
-    } catch (_) {
-      // Ignore JSON parse errors and treat as plain text.
+  String? _extractStreamText(dynamic decoded, String raw) {
+    if (decoded is String) {
+      return decoded;
     }
-    return data;
+    if (decoded is Map<String, dynamic>) {
+      final type = decoded['type'];
+      if (type == 'text') {
+        final content = decoded['content'];
+        if (content is String && content.trim().isNotEmpty) {
+          return content;
+        }
+      }
+      final candidates = ['content', 'message', 'text', 'delta', 'answer', 'result'];
+      for (final key in candidates) {
+        final value = decoded[key];
+        if (value is String && value.trim().isNotEmpty) {
+          return value;
+        }
+      }
+      return raw;
+    }
+    return raw;
+  }
+
+  void _updateStreamingStatus(String aiMessageId, String status) {
+    if (!mounted) return;
+    final index = _messages.indexWhere((item) => item.id == aiMessageId);
+    if (index == -1) return;
+    final current = _messages[index];
+    final extra = current.extra == null ? <String, dynamic>{} : Map<String, dynamic>.from(current.extra!);
+    if (extra['statusText'] == status) return;
+    extra['statusText'] = status;
+    final updated = MessageEntity(
+      id: current.id,
+      type: current.type,
+      content: current.content,
+      isFromUser: current.isFromUser,
+      extra: extra,
+      timestamp: current.timestamp,
+    );
+    setState(() {
+      _messages[index] = updated;
+    });
   }
 
   void _enqueueDelta(String text) {
@@ -468,12 +504,17 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _startNewSession() async {
     _cancelAiStream();
+    final userId = UserSession.userId;
+    if (userId == null || userId.isEmpty) {
+      debugPrint('start session skipped: missing userId');
+      return;
+    }
     String? newSessionId;
     try {
       final response = await ApiClient.instance.post(
         '/session/start',
-        data: const {
-          'userId': '1234567',
+        data: {
+          'userId': userId,
         },
       );
       debugPrint('session/start response: ${response.data}');
@@ -590,11 +631,16 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _bootstrapInitialSession() async {
+    final userId = UserSession.userId;
+    if (userId == null || userId.isEmpty) {
+      debugPrint('bootstrap session skipped: missing userId');
+      return;
+    }
     try {
       final response = await ApiClient.instance.get(
         '/session/list',
-        queryParameters: const {
-          'userId': '1234567',
+        queryParameters: {
+          'userId': userId,
           'limit': 50,
           'offset': 0,
         },
@@ -647,6 +693,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _fetchSessionHistory(String sessionId) async {
+    final userId = UserSession.userId;
+    if (userId == null || userId.isEmpty) {
+      debugPrint('fetch history skipped: missing userId');
+      return;
+    }
     _cancelAiStream();
     setState(() {
       _isHistoryLoading = true;
@@ -656,7 +707,7 @@ class _ChatPageState extends State<ChatPage> {
       final response = await ApiClient.instance.get(
         '/session/history',
         queryParameters: {
-          'userId': '1234567',
+          'userId': userId,
           'sessionId': sessionId,
           'limit': 200,
           'offset': 0,

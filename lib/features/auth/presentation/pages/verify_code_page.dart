@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:xiaobang/core/network/api_client.dart';
 import 'package:xiaobang/core/theme/app_theme.dart';
+import 'package:xiaobang/core/utils/user_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xiaobang/features/chat/presentation/pages/chat_page.dart';
 
@@ -161,6 +162,7 @@ class _VerifyCodePageState extends State<VerifyCodePage> {
       if (userInfo != null) {
         await prefs.setString('user_info', jsonEncode(userInfo));
       }
+      UserSession.updateFromLoginPayload(data);
     } catch (error, stackTrace) {
       debugPrint('persist auth error: $error');
       debugPrint('$stackTrace');

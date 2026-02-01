@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:xiaobang/core/network/api_client.dart';
 import 'package:xiaobang/core/theme/app_theme.dart';
+import 'package:xiaobang/core/utils/user_session.dart';
 
 class AppDrawer extends StatefulWidget {
   const AppDrawer({super.key});
@@ -66,11 +67,20 @@ class _AppDrawerState extends State<AppDrawer> {
       _isLoading = true;
       _hasError = false;
     });
+    final userId = UserSession.userId;
+    if (userId == null || userId.isEmpty) {
+      debugPrint('session list skipped: missing userId');
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+      });
+      return;
+    }
     try {
       final response = await ApiClient.instance.get(
         '/session/list',
-        queryParameters: const {
-          'userId': '1234567',
+        queryParameters: {
+          'userId': userId,
           'limit': 50,
           'offset': 0,
         },
