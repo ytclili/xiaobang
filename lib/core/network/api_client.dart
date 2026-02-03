@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
   ApiClient._internal() {
@@ -14,6 +15,27 @@ class ApiClient {
         request: true,
         requestBody: true,
         responseBody: true,
+      ),
+    );
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final token = prefs.getString('auth_token');
+            final hasAuthHeader = options.headers.containsKey('Authorization') ||
+                options.headers.containsKey('authorization');
+            if (!hasAuthHeader && token != null && token.isNotEmpty) {
+              final trimmed = token.trim();
+              final bearerPattern = RegExp(r'^Bearer\s+', caseSensitive: false);
+              options.headers['Authorization'] =
+                  bearerPattern.hasMatch(trimmed) ? trimmed : 'Bearer $trimmed';
+            }
+          } catch (_) {
+            // Ignore auth header errors to avoid blocking requests.
+          }
+          handler.next(options);
+        },
       ),
     );
   }

@@ -26,12 +26,21 @@ class _ChatPageState extends State<ChatPage> {
   static const int _recommendPlaceholderCount = 3;
   static const List<double> _recommendPlaceholderWidths = [220, 260, 200];
   static const double _scrollToBottomThreshold = 80.0;
+  static String _greetingForNow() {
+    final hour = DateTime.now().hour;
+    if (hour < 6) return '凌晨好，hi！';
+    if (hour < 12) return '早上好，hi！';
+    if (hour < 14) return '中午好，hi！';
+    if (hour < 18) return '下午好，hi！';
+    return '晚上好，hi！';
+  }
+
   // 妯℃嫙鑱婂ぉ娑堟伅鏁版嵁锛堟敼涓哄彲鍙樺垪琛級
   final List<MessageEntity> _messages = [
     MessageEntity(
       id: '1',
       type: MessageType.header,
-      content: '\u665a\u4e0a\u597d\uff0chi\uff01',
+      content: _greetingForNow(),
     ),
   ];
 
@@ -48,16 +57,20 @@ class _ChatPageState extends State<ChatPage> {
   bool _isHistoryLoading = false;
   bool _skipNextMessageAnimation = false;
   final Queue<String> _pendingDeltas = Queue<String>();
+  final List<Map<String, dynamic>> _pendingComponentPayloads = [];
   Timer? _streamFlushTimer;
   String? _activeAiMessageId;
   bool _streamDone = false;
+  static final Map<String, Map<String, dynamic>> _streamExtraPayloadBySession = {};
   static const int _maxCharsPerTick = 4;
   int _lastAutoScrollMs = 0;
   bool _showScrollToBottom = false;
+  Timer? _greetingTimer;
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScrollPositionChanged);
+    _startGreetingTimer();
     _sessionSelectionListener = () {
       final id = SessionSelectionBus.selectedSessionId.value;
       if (id == null || id.isEmpty) return;
@@ -93,7 +106,34 @@ class _ChatPageState extends State<ChatPage> {
     _scrollController.dispose();
     _drawerFocusNode.dispose();
     SessionSelectionBus.selectedSessionId.removeListener(_sessionSelectionListener);
+    _greetingTimer?.cancel();
     super.dispose();
+  }
+
+  void _startGreetingTimer() {
+    _greetingTimer?.cancel();
+    _greetingTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _refreshGreetingIfNeeded();
+    });
+  }
+
+  void _refreshGreetingIfNeeded() {
+    if (!mounted) return;
+    final index = _messages.indexWhere((item) => item.type == MessageType.header);
+    if (index == -1) return;
+    final current = _messages[index];
+    final nextGreeting = _greetingForNow();
+    if (current.content == nextGreeting) return;
+    setState(() {
+      _messages[index] = MessageEntity(
+        id: current.id,
+        type: current.type,
+        content: nextGreeting,
+        isFromUser: current.isFromUser,
+        extra: current.extra,
+        timestamp: current.timestamp,
+      );
+    });
   }
 
   Future<void> _fetchRecommendQuestions() async {
@@ -159,13 +199,18 @@ class _ChatPageState extends State<ChatPage> {
     _sseBuffer = '';
     _utf16Carry = '';
     _pendingDeltas.clear();
+    _pendingComponentPayloads.clear();
     _streamFlushTimer?.cancel();
     _streamFlushTimer = null;
     _activeAiMessageId = null;
     _streamDone = false;
   }
 
-  Future<void> _startAiStream(String userMessage, String aiMessageId) async {
+  Future<void> _startAiStream(
+    String userMessage,
+    String aiMessageId, {
+    Map<String, dynamic>? extraPayload,
+  }) async {
     _cancelAiStream();
     final userId = UserSession.userId;
     if (userId == null || userId.isEmpty) {
@@ -178,13 +223,18 @@ class _ChatPageState extends State<ChatPage> {
     _activeAiMessageId = aiMessageId;
     _streamDone = false;
     try {
+      final payload = <String, dynamic>{
+        'message': userMessage,
+        'userId': userId,
+        'sessionId': _currentSessionId,
+      };
+      final mergedExtra = _mergeStreamExtraPayload(extraPayload);
+      if (mergedExtra.isNotEmpty) {
+        payload.addAll(mergedExtra);
+      }
       final response = await ApiClient.instance.postStream(
         'https://ai.xcbm.cc/api/chat/stream',
-        data: {
-          'message': userMessage,
-          'userId': userId,
-          'sessionId': _currentSessionId,
-        },
+        data: payload,
         options: Options(receiveTimeout: const Duration(minutes: 1)),
         cancelToken: _streamCancelToken,
       );
@@ -204,6 +254,9 @@ class _ChatPageState extends State<ChatPage> {
         cancelOnError: true,
       );
     } catch (error, stackTrace) {
+      if (error is DioException) {
+        debugPrint('ai stream request error response: ${error.response?.data}');
+      }
       debugPrint('ai stream request error: $error');
       debugPrint('$stackTrace');
       _failAiStream(aiMessageId, '请求超时，请重试');
@@ -238,6 +291,15 @@ class _ChatPageState extends State<ChatPage> {
             if (status is String && status.trim().isNotEmpty) {
               _updateStreamingStatus(aiMessageId, status.trim());
             }
+            continue;
+          }
+          if (type == 'component') {
+            final componentType = decoded['component_type']?.toString() ??
+                decoded['componentType']?.toString();
+            if (componentType == 'claim_result') {
+              _clearSkuIdForCurrentSession();
+            }
+            _queueComponentPayload(decoded);
             continue;
           }
         }
@@ -292,6 +354,110 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {
       _messages[index] = updated;
     });
+  }
+
+  void _queueComponentPayload(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    _pendingComponentPayloads.add(Map<String, dynamic>.from(payload));
+  }
+
+  void _flushPendingComponents() {
+    if (!mounted) return;
+    if (_pendingComponentPayloads.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final List<MessageEntity> components = [];
+    for (var i = 0; i < _pendingComponentPayloads.length; i++) {
+      final payload = _pendingComponentPayloads[i];
+      final entity = _buildComponentMessage(payload, '${now}_$i');
+      if (entity != null) {
+        components.add(entity);
+      }
+    }
+    _pendingComponentPayloads.clear();
+    if (components.isEmpty) return;
+    setState(() {
+      _messages.addAll(components);
+    });
+  }
+
+  MessageEntity? _buildComponentMessage(Map<String, dynamic> payload, String suffix) {
+    if (!mounted) return null;
+    final rawData = payload['data'];
+    final componentType =
+        payload['component_type']?.toString() ??
+        payload['componentType']?.toString() ??
+        (rawData is Map ? rawData['type']?.toString() : null);
+    final items = _extractComponentItems(rawData, componentType);
+    if (items.isEmpty) return null;
+    final message = payload['message']?.toString() ?? '';
+    final meta = _extractComponentMeta(rawData);
+    return MessageEntity(
+      id: 'component_$suffix',
+      type: MessageType.component,
+      content: message,
+      isFromUser: false,
+      extra: {
+        'componentType': componentType,
+        'items': items,
+        if (meta != null && meta.isNotEmpty) 'meta': meta,
+      },
+    );
+  }
+
+  List<Map<String, dynamic>> _extractComponentItems(dynamic rawData, String? componentType) {
+    if (rawData is String) {
+      try {
+        rawData = jsonDecode(rawData);
+      } catch (_) {
+        return const <Map<String, dynamic>>[];
+      }
+    }
+    if (rawData is List) {
+      return rawData
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    }
+    if (rawData is Map) {
+      if (componentType == 'claim_result') {
+        return [Map<String, dynamic>.from(rawData)];
+      }
+      final list = rawData['list'] ?? rawData['items'] ?? rawData['data'];
+      if (list is List) {
+        return list
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+      }
+      if (list is Map) {
+        final nestedList = list['list'] ?? list['items'];
+        if (nestedList is List) {
+          return nestedList
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
+        }
+      }
+    }
+    return const <Map<String, dynamic>>[];
+  }
+
+  Map<String, dynamic>? _extractComponentMeta(dynamic rawData) {
+    if (rawData is String) {
+      try {
+        rawData = jsonDecode(rawData);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (rawData is Map) {
+      final meta = Map<String, dynamic>.from(rawData);
+      meta.remove('list');
+      meta.remove('items');
+      meta.remove('data');
+      return meta;
+    }
+    return null;
   }
 
   void _enqueueDelta(String text) {
@@ -405,6 +571,7 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {
       _messages[index] = updated;
     });
+    _flushPendingComponents();
     _scrollToBottom(smooth: true, force: true);
     _maybeRefreshSessionListAfterFirstRound();
   }
@@ -419,6 +586,7 @@ class _ChatPageState extends State<ChatPage> {
   void _failAiStream(String aiMessageId, String message) {
     if (!mounted) return;
     _pendingDeltas.clear();
+    _pendingComponentPayloads.clear();
     _streamFlushTimer?.cancel();
     _streamFlushTimer = null;
     _streamDone = true;
@@ -551,7 +719,7 @@ class _ChatPageState extends State<ChatPage> {
           MessageEntity(
             id: '1',
             type: MessageType.header,
-            content: '晚上好，hi！',
+            content: _greetingForNow(),
           ),
         );
       _insertRecommendPlaceholders();
@@ -569,6 +737,41 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _handleSendMessage(String text) {
+    _sendUserMessage(text);
+  }
+
+  void _handleSubsidyClaim(Map<String, dynamic> item) {
+    final skuName = item['name']?.toString() ??
+        item['skuName']?.toString() ??
+        item['title']?.toString() ??
+        '';
+    final skuId = _extractSkuId(item);
+    final message = skuName.isNotEmpty ? '请帮我领取${skuName}的补贴' : '请帮我领取补贴';
+    if (skuId == null || skuId.isEmpty) {
+      debugPrint('subsidy claim skipped: missing skuId');
+    } else {
+      _setStreamExtraPayloadForCurrentSession({
+        'skuId': skuId,
+        'city': '上海',
+      });
+    }
+    _sendUserMessage(
+      message,
+      extraPayload: {
+        'skuId': skuId,
+        'city': '上海',
+      },
+    );
+  }
+
+  String? _extractSkuId(Map<String, dynamic> item) {
+    final rawId = item['id'];
+    if (rawId is int) return rawId.toString();
+    if (rawId is String && rawId.trim().isNotEmpty) return rawId.trim();
+    return null;
+  }
+
+  void _sendUserMessage(String text, {Map<String, dynamic>? extraPayload}) {
     if (text.trim().isEmpty) return;
 
     FocusScope.of(context).unfocus();
@@ -605,7 +808,57 @@ class _ChatPageState extends State<ChatPage> {
       ));
     });
     _scrollToBottom(smooth: true);
-    _startAiStream(text, aiMessageId);
+    _startAiStream(text, aiMessageId, extraPayload: extraPayload);
+  }
+
+  Map<String, dynamic> _mergeStreamExtraPayload(Map<String, dynamic>? extraPayload) {
+    final merged = <String, dynamic>{};
+    final stored = _getStreamExtraPayloadForCurrentSession();
+    if (stored != null && stored.isNotEmpty) {
+      merged.addAll(stored);
+    }
+    if (extraPayload != null && extraPayload.isNotEmpty) {
+      merged.addAll(extraPayload);
+    }
+    merged.removeWhere((key, value) {
+      if (value == null) return true;
+      if (value is String && value.trim().isEmpty) return true;
+      return false;
+    });
+    return merged;
+  }
+
+  String? _currentExtraPayloadKey() {
+    final userId = UserSession.userId;
+    if (userId == null || userId.isEmpty) return null;
+    final sessionId = _currentSessionId;
+    if (sessionId.isEmpty) return null;
+    return '$userId:$sessionId';
+  }
+
+  void _setStreamExtraPayloadForCurrentSession(Map<String, dynamic> payload) {
+    final key = _currentExtraPayloadKey();
+    if (key == null) return;
+    _streamExtraPayloadBySession[key] = Map<String, dynamic>.from(payload);
+  }
+
+  Map<String, dynamic>? _getStreamExtraPayloadForCurrentSession() {
+    final key = _currentExtraPayloadKey();
+    if (key == null) return null;
+    return _streamExtraPayloadBySession[key];
+  }
+
+  void _clearSkuIdForCurrentSession() {
+    final key = _currentExtraPayloadKey();
+    if (key == null) return;
+    final existing = _streamExtraPayloadBySession[key];
+    if (existing == null) return;
+    existing.remove('skuId');
+    if (existing.isEmpty) {
+      _streamExtraPayloadBySession.remove(key);
+    } else {
+      _streamExtraPayloadBySession[key] = existing;
+    }
   }
 
   List<Widget> _buildMessageWidgets() {
@@ -614,6 +867,7 @@ class _ChatPageState extends State<ChatPage> {
       final messageWidget = ChatItemFactory.build(
         _messages[i],
         onQuickActionTap: _handleSendMessage,
+        onSubsidyTap: _handleSubsidyClaim,
       );
       if (_skipNextMessageAnimation) {
         widgets.add(messageWidget);
@@ -796,6 +1050,12 @@ class _ChatPageState extends State<ChatPage> {
             content: answer,
             isFromUser: false,
           ));
+          _appendHistoryComponentIfAny(
+            results: results,
+            sessionId: sessionId,
+            metadata: _decodeHistoryMeta(item['metadata'] ?? item['meta']),
+            isFromUser: false,
+          );
         }
         if ((question != null && question.isNotEmpty) || (answer != null && answer.isNotEmpty)) {
           continue;
@@ -809,6 +1069,12 @@ class _ChatPageState extends State<ChatPage> {
           content: content,
           isFromUser: isFromUser,
         ));
+        _appendHistoryComponentIfAny(
+          results: results,
+          sessionId: sessionId,
+          metadata: _decodeHistoryMeta(item['metadata'] ?? item['meta']),
+          isFromUser: isFromUser,
+        );
       } else if (item is String && item.trim().isNotEmpty) {
         results.add(_historyMessage(
           sessionId: sessionId,
@@ -840,6 +1106,77 @@ class _ChatPageState extends State<ChatPage> {
       final value = item[key];
       if (value is String && value.trim().isNotEmpty) {
         return value;
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _decodeHistoryMeta(dynamic metadata) {
+    if (metadata == null) return null;
+    if (metadata is Map<String, dynamic>) {
+      return Map<String, dynamic>.from(metadata);
+    }
+    if (metadata is String) {
+      final trimmed = metadata.trim();
+      if (trimmed.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  void _appendHistoryComponentIfAny({
+    required List<MessageEntity> results,
+    required String sessionId,
+    required Map<String, dynamic>? metadata,
+    required bool isFromUser,
+  }) {
+    if (isFromUser || metadata == null || metadata.isEmpty) return;
+    final componentType = _readComponentType(metadata);
+    final items = _extractComponentItems(metadata, componentType);
+    if (items.isEmpty) return;
+    final resolvedType = componentType ?? _inferComponentTypeFromItems(items);
+    final meta = _extractComponentMeta(metadata);
+    results.add(MessageEntity(
+      id: 'history_${sessionId}_component_${results.length}',
+      type: MessageType.component,
+      content: '',
+      isFromUser: false,
+      extra: {
+        'componentType': resolvedType,
+        'items': items,
+        if (meta != null && meta.isNotEmpty) 'meta': meta,
+      },
+    ));
+  }
+
+  String? _readComponentType(Map<String, dynamic> metadata) {
+    final candidates = [
+      metadata['component_type'],
+      metadata['componentType'],
+      metadata['type'],
+    ];
+    for (final value in candidates) {
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  String? _inferComponentTypeFromItems(List<Map<String, dynamic>> items) {
+    for (final item in items) {
+      if (item.containsKey('orderNo') ||
+          item.containsKey('orderStatus') ||
+          item.containsKey('orderStatusText') ||
+          item.containsKey('voucherExpiryDate')) {
+        return 'order_list';
       }
     }
     return null;

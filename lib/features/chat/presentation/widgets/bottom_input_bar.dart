@@ -130,7 +130,10 @@ class _BottomInputBarState extends State<BottomInputBar> {
   // 键盘输入模式的文本框
   Widget _buildTextField() {
     return Container(
-      height: 40.h,
+      constraints: BoxConstraints(
+        minHeight: 40.h,
+        maxHeight: 120.h,
+      ),
       decoration: BoxDecoration(
         color: XiaobangColors.inputBg,
         borderRadius: BorderRadius.circular(20.h),
@@ -139,20 +142,22 @@ class _BottomInputBarState extends State<BottomInputBar> {
       child: TextField(
         controller: _textController,
         focusNode: _focusNode,
-        textAlignVertical: TextAlignVertical.center,
+        textAlignVertical: TextAlignVertical.top,
+        keyboardType: TextInputType.multiline,
+        textInputAction: TextInputAction.newline,
         decoration: InputDecoration(
           hintText: "发消息",
           hintStyle: TextStyle(color: XiaobangColors.textSecondary),
           border: InputBorder.none,
-          contentPadding: EdgeInsets.only(bottom: 13.h),
+          contentPadding: EdgeInsets.symmetric(vertical: 10.h),
         ),
         style: TextStyle(
           fontSize: 15.sp,
           color: XiaobangColors.textMain,
+          height: 1.4,
         ),
-        maxLines: 1,
-        textInputAction: TextInputAction.send,
-        onSubmitted: (_) => _sendMessage(),
+        minLines: 1,
+        maxLines: 5,
       ),
     );
   }

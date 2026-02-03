@@ -222,7 +222,7 @@ class _AppDrawerState extends State<AppDrawer> {
                         ),
                         SizedBox(height: 16.h),
                         Text(
-                          'Hi, \u7528\u6237',
+                          'Hi, ${UserSession.displayName ?? '\u7528\u6237'}',
                           style: TextStyle(
                             fontSize: 20.sp,
                             fontWeight: FontWeight.bold,

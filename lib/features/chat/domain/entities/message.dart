@@ -4,7 +4,8 @@ enum MessageType {
   todo,         // 待办/话题卡片
   richText,     // 富文本回复
   text,         // 普通文本消息
-  status,       // 状态提示（如：已通过全网收集17条参考信息）
+  status,
+  component,
 }
 
 class MessageEntity {
